@@ -34,6 +34,7 @@
 #include <jni.h>
 
 #include <android/api-level.h>
+#include <android/native_window_jni.h>
 
 #include "../../vlc/contrib/android/ffmpeg/libavutil/avstring.h"
 #include "../../vlc/contrib/android/ffmpeg/libavutil/log.h"
@@ -229,10 +230,22 @@ static jobject debugBufferInstance = NULL;
 static pthread_mutex_t vout_android_lock;
 static void *vout_android_surf = NULL;
 static void *vout_android_gui = NULL;
+static ANativeWindow *vout_android_native_window = NULL;
 
 void *jni_LockAndGetAndroidSurface() {
     pthread_mutex_lock(&vout_android_lock);
     return vout_android_surf;
+}
+
+ANativeWindow *jni_ObtainAndroidNativeWindow() {
+    ANativeWindow *window = NULL;
+    pthread_mutex_lock(&vout_android_lock);
+    if (vout_android_native_window != NULL) {
+        ANativeWindow_acquire(vout_android_native_window);
+        window = vout_android_native_window;
+    }
+    pthread_mutex_unlock(&vout_android_lock);
+    return window;
 }
 
 void jni_UnlockAndroidSurface() {
@@ -334,7 +347,16 @@ void Java_org_videolan_libvlc_LibVLC_attachSurface(JNIEnv *env, jobject thiz, jo
     vout_android_surf = (void*)(*env)->GetIntField(env, surf, fid);
     (*env)->DeleteLocalRef(env, clz);
 
-    vout_android_gui = (*env)->NewGlobalRef(env, gui);
+    if (vout_android_gui != gui)
+        vout_android_gui = (*env)->NewGlobalRef(env, gui);
+
+    if (vout_android_native_window) {
+        ANativeWindow_release(vout_android_native_window);
+        vout_android_native_window = NULL;
+    }
+    if (surf)
+        vout_android_native_window = ANativeWindow_fromSurface(env, surf);
+
     pthread_mutex_unlock(&vout_android_lock);
 }
 
@@ -344,6 +366,10 @@ void Java_org_videolan_libvlc_LibVLC_detachSurface(JNIEnv *env, jobject thiz) {
     if (vout_android_gui != NULL)
         (*env)->DeleteGlobalRef(env, vout_android_gui);
     vout_android_gui = NULL;
+    if (vout_android_native_window) {
+        ANativeWindow_release(vout_android_native_window);
+        vout_android_native_window = NULL;
+    }
     pthread_mutex_unlock(&vout_android_lock);
 }
 
